@@ -1,4 +1,4 @@
-# Raspberry Pi 3B+ Discord 智慧門鎖
+# Raspberry Pi Discord 智慧門鎖
 
 這個專案使用 Raspberry Pi 3B+、Discord Bot 與 SG90 伺服馬達，透過拉動傳統電鎖的機械開門機構來完成遠端解鎖。它不修改原本的讀卡機控制線路；使用者在 Discord 輸入 `/open` 後，樹莓派控制 SG90 拉動繩索，短暫解鎖後再回到待機位置。
 
@@ -47,7 +47,7 @@ Discord Bot 由 Raspberry Pi 主動連線到 Discord，不需要替 Bot 開放 W
 | Discord 指令 | `/open`，使用 Ephemeral 私人回覆 |
 | 背景服務 | `doorbot.service`，開機自動啟動 |
 
-角度與時間取決於 SG90 固定位置、搖臂長度、繩索鬆緊及電鎖機構。請從較小角度開始測試，不要直接照抄 37° 後就把繩索拉到最緊。
+拉伸角度與時間取決於 SG90 固定位置、搖臂長度、繩索鬆緊及電鎖機構。請從較小角度開始測試。
 
 ## 準備材料
 
