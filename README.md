@@ -310,7 +310,8 @@ DISCORD_GUILD_ID=伺服器ID
 chmod 600 ~/.config/discord-door-bot/env
 ```
 
-任何曾經貼到對話、文件或 Git 的 Token 都應視為已外洩。請在 Discord Developer Portal 重置，不要繼續使用舊 Token。
+> [!WARNING]
+> 任何曾經貼到對話、文件或 Git 的 Token 都應視為已外洩。請在 Discord Developer Portal 重置，不要繼續使用舊 Token。
 
 ## 首次測試與角度校正
 
