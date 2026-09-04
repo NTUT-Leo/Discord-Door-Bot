@@ -483,10 +483,9 @@ sudo journalctl -u doorbot.service -n 50 --no-pager
 
 ## 參考文件
 
-- [Raspberry Pi 官方安裝與無頭設定說明](https://www.raspberrypi.com/documentation/computers/getting-started.html)
+- [Raspberry Pi 官方安裝與設定說明](https://www.raspberrypi.com/documentation/computers/getting-started.html)
 - [Raspberry Pi 官方 UART 與 GPIO 設定](https://www.raspberrypi.com/documentation/computers/configuration.html)
 - [Raspberry Pi 官方 GPIO 規格](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html)
-- [Raspberry Pi 官方 vcgencmd 與 get_throttled 說明](https://www.raspberrypi.com/documentation/computers/os.html#vcgencmd)
 - [Discord Application Commands 官方文件](https://docs.discord.com/developers/interactions/application-commands)
 - [discord.py Interactions API](https://discordpy.readthedocs.io/en/stable/interactions/api.html)
 - [GPIO Zero AngularServo 文件](https://gpiozero.readthedocs.io/en/latest/api_output.html#angularservo)
