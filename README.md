@@ -1,492 +1,414 @@
-# Raspberry Pi Discord 智慧門鎖
+# Discord Door Bot
 
-這個專案使用 Raspberry Pi 3B+、Discord Bot 與 SG90 伺服馬達，透過拉動傳統電鎖的機械開門機構來完成遠端解鎖。它不修改原本的讀卡機控制線路；使用者在 Discord 輸入 `/open` 後，樹莓派控制 SG90 拉動繩索，短暫解鎖後再回到待機位置。
+Use a Raspberry Pi and an SG90 servo to add Discord-based remote control to a traditional mechanical door lock without modifying its existing card reader or electrical wiring. The project provides a guided installer for a quick setup and a complete manual DIY path for learning each deployment step.
+
+本專案使用 Raspberry Pi 搭配 SG90 伺服馬達，以繩索拉動傳統電鎖內的機械開門結構。使用者可在指定的 Discord 伺服器執行 `/open`，不需要改動原有讀卡機或電鎖線路。
 
 > [!WARNING]
-> 這是會實際控制門鎖的裝置。只應安裝在你有權管理的門上，且不得影響消防逃生、室內機械開門、原讀卡機或鑰匙的正常功能。接線與調整機構前，請先關閉樹莓派及伺服馬達電源。
+> 本裝置僅屬門禁輔助，只應安裝於你有權管理的門上，且不得影響消防逃生、門鎖機構、原讀卡機或鑰匙之正常功能。
 
 ## 成果展示
 
-![Raspberry Pi 與 SG90 安裝完成](Result_Images/IMG_1.jpg)
+<p align="center">
+  <img src="Result_Images/IMG_1.jpg" alt="Raspberry Pi 與 SG90 安裝在傳統電鎖旁的完成外觀" width="48%">
+  <img src="Result_Images/IMG_2.jpg" alt="打開電鎖外蓋後可看見 SG90 繩索與內部機械結構" width="48%">
+</p>
 
-Raspberry Pi 3B+ 固定於電鎖旁，SG90 以繩索連接開門機構。
+左圖是安裝完成的外觀；右圖展示 SG90 如何透過繩索拉動電鎖內部機構。
 
-![SG90 拉動電鎖內部機構](Result_Images/IMG_2.jpg)
-
-打開外蓋後可看到繩索與電鎖內部連桿的連接位置。繩索必須避開彈簧、電磁線圈、鎖舌與其他移動零件。
-
-## 系統架構
+## 運作原理
 
 ```mermaid
 flowchart LR
-    U[Discord 使用者] -->|/open| D[Discord]
-    D -->|Interaction| B[Python Discord Bot]
-    B -->|GPIO 14 PWM| S[SG90 伺服馬達]
-    S -->|拉動繩索| L[電鎖機械開門機構]
-    B -->|Ephemeral 回覆| U
+    U[Discord 使用者] -->|Guild 專用 /open| D[Discord]
+    D -->|Gateway 連線| B[Python Discord Bot]
+    B -->|gpiozero 與 rpi-lgpio| G[BCM GPIO14]
+    G --> S[SG90 伺服馬達]
+    S -->|拉動繩索| L[電鎖機械開門結構]
 ```
 
-Discord Bot 由 Raspberry Pi 主動連線到 Discord，不需要替 Bot 開放 Web Server 或設定路由器連入埠。SSH 僅用於管理樹莓派，不應把 SSH 位址、帳號或密碼寫進公開儲存庫。
+SG90 固定在電鎖附近，馬達搖臂以不易延展的繩索連接原有機械開門結構。收到 `/open` 後，馬達轉到開鎖角度、短暫停留，再回到待機角度並停止 PWM 輸出。
 
-## 實機驗證環境
+主要特性：
 
-以下版本與參數已在 2026 年 9 月 4 日核對：
+- `/open` 只同步到一個指定的 Discord 伺服器，不提供私訊或全域指令。
+- Discord 回覆採用 ephemeral 訊息，只有指令呼叫者看得到。
+- 同一時間只執行一個開鎖動作，避免重複請求互相干擾。
+- 動作失敗時仍會嘗試歸位並停止 PWM 輸出。
+- Token 與角度存放在 Git 以外、權限為 `0600` 的系統設定檔。
+- systemd 會在樹莓派開機後啟動 Bot，並在程式異常結束時重新啟動。
 
-| 項目 | 實機設定 |
-| --- | --- |
-| 主控板 | Raspberry Pi 3B+ |
-| 作業系統 | Raspberry Pi OS Lite 64-bit，Debian 13 Trixie base |
-| Python | 3.13.5 |
-| Discord 函式庫 | `discord.py 2.7.1` |
-| GPIO 函式庫 | `gpiozero 2.0.1`、`rpi-lgpio 0.6` |
-| 伺服馬達訊號 | BCM GPIO 14，實體 Pin 8 |
-| 角度範圍 | 0° 至 90° |
-| 待機角度 | 0° |
-| 開鎖角度 | 37° |
-| 拉動時間 | 0.5 秒 |
-| Discord 指令 | `/open`，使用 Ephemeral 私人回覆 |
-| 背景服務 | `doorbot.service`，開機自動啟動 |
+本專案沒有門位或鎖舌感測器，因此「解鎖動作已完成」只代表伺服馬達控制流程已結束，不代表門鎖一定已實際開啟。
 
-拉伸角度與時間取決於 SG90 固定位置、搖臂長度、繩索鬆緊及電鎖機構。請從較小角度開始測試。
+## 硬體材料與機構
 
-## 準備材料
-
-- Raspberry Pi 3B+ 與穩定的 5V 電源
-- 16 GB 以上的 microSD 卡與讀卡機
+- Raspberry Pi 3B+，或其他具有 40-pin GPIO 排針的 Raspberry Pi
+- Raspberry Pi OS Lite 64-bit
 - SG90 伺服馬達
-- 獨立穩壓 5V 電源，建議供 SG90 使用
-- 杜邦線或合適的伺服馬達延長線
-- 不易伸長的細繩，例如 PE 釣魚線
-- 伺服馬達固定座、束帶或適合安裝面的固定材料
-- 選配 10 kΩ 下拉電阻，用於減少開機時的訊號浮動
-- 可使用 Discord Developer Portal 的 Discord 帳號
+- 不易延展的繩索，例如 PE 釣魚線
+- SG90 搖臂與螺絲
+- 支架、束帶或適合現場材質的固定零件
+- MicroSD 卡與符合 Raspberry Pi 規格的電源供應器
+- 杜邦線，或經確認腳位後重新排列的三芯伺服接頭
+- 選配：獨立 5V 伺服馬達電源
 
-## GPIO 接線
+固定馬達時，先保留原本按鈕、鎖舌與讀卡機的活動空間。繩索在待機位置應保持放鬆，馬達轉動後才拉動機構；不要讓 SG90 長時間頂住機械極限或持續發出堵轉聲。
 
-### 推薦接法
+## 接線與供電
 
-| SG90 線材 | 連接位置 | 說明 |
+> [!CAUTION]
+> 接線或重新排列接頭前，必須先關閉 Raspberry Pi 與外部電源。SG90 線色並非絕對標準，請同時核對馬達標示與資料表。
+
+程式採用 **BCM 編號**。預設訊號腳位為 BCM GPIO14，也就是 40-pin 排針的實體 Pin 8。
+
+| SG90 功能 | 常見線色 | Raspberry Pi 接點 | 實體 Pin |
+| --- | --- | --- | ---: |
+| PWM 訊號 | 橘色或黃色 | BCM GPIO14 | 8 |
+| 5V 電源 | 紅色 | 5V，或外部 5V 正極 | 4 |
+| GND | 棕色或黑色 | GND | 6 |
+
+### SG90 接頭重新排序
+
+成果照片使用實體 Pin 4、6、8 連續排列，因此三芯接頭必須依照 `5V、GND、訊號` 排列。SG90 原廠接頭通常不是這個順序；未重新排列就直接套上排針，可能造成短路或損壞硬體。
+
+1. 確認 SG90 每條線的實際功能。
+2. 抬起接頭端子的塑膠卡榫，逐一抽出端子。
+3. 依 `5V、GND、訊號` 順序重新插回接頭。
+4. 用萬用電表或線路標示再次確認後才能通電。
+
+也可以不修改原接頭，改用三條杜邦線分別接到正確腳位。
+
+### 方案 A：由 Raspberry Pi 5V 供電
+
+1. SG90 5V 接實體 Pin 4。
+2. SG90 GND 接實體 Pin 6。
+3. SG90 訊號接實體 Pin 8，也就是 BCM GPIO14。
+
+此方案零件較少，但伺服馬達的瞬間電流可能使 Raspberry Pi 欠壓、重開機或造成 USB 裝置不穩定。Raspberry Pi 3 官方建議使用 5V、2.5A 電源，實際餘裕仍取決於其他周邊裝置。[Raspberry Pi 電源文件](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#power-supply)
+
+### 方案 B：使用外部 5V 電源
+
+1. SG90 5V 接外部電源正極。
+2. SG90 GND 接外部電源負極。
+3. 外部電源負極再接 Raspberry Pi 任一 GND，讓兩邊共地。
+4. SG90 訊號線仍接 BCM GPIO14。
+
+使用兩組已上電的電源時，不要把外部 5V 正極接到 Raspberry Pi 的 5V pin；本方案只共用 GND。若 Pi 直供造成不穩定，應優先改用外部電源。
+
+### 檢查 Raspberry Pi 是否欠壓
+
+```bash
+vcgencmd get_throttled
+```
+
+- `throttled=0x0`：本次開機以來沒有回報欠壓或降頻。
+- 非零值：目前或本次開機期間曾發生欠壓、過熱或降頻，需要檢查供電與負載。
+- 若驅動 SG90 後才變成非零值，請改用更合適的 Pi 電源或獨立馬達電源。
+
+## 準備 Discord Bot
+
+1. 開啟 [Discord Developer Portal](https://discord.com/developers/applications)，建立一個 Application。
+2. 在 **Bot** 頁面建立 Bot 並產生 Token。Token 只輸入樹莓派，不要放入程式碼、README、截圖或 Git commit。
+3. 本專案不需要開啟 `Message Content Intent`、`Presence Intent` 或 `Server Members Intent`。
+4. 在 **Installation** 頁面啟用 **Guild Install**，並在 Default Install Settings 加入 `applications.commands` 與 `bot` scopes。Bot 權限只選擇實際需要的項目。[Discord 安裝設定](https://docs.discord.com/developers/tutorials/developing-a-user-installable-app#configuring-default-install-settings)
+5. 使用 Installation 頁面的安裝連結將 Bot 加入目標伺服器。
+6. 在 Discord 用戶端開啟 Developer Mode，對目標伺服器按右鍵並複製 **Server ID**；這就是稍後需要輸入的 Guild ID。
+7. 到 **Server Settings > Integrations > 你的 Bot > Manage**，設定哪些使用者、角色與頻道可以執行 `/open`。[Discord Application Commands 權限](https://docs.discord.com/developers/interactions/application-commands#permissions)
+
+程式不維護使用者或角色白名單；門禁權限完全由 Discord 伺服器管理員透過 Integrations 設定。
+
+## 下載專案
+
+先用 Raspberry Pi Imager 安裝 Raspberry Pi OS Lite 64-bit，並在 OS Customisation 中設定使用者、網路與 SSH。登入樹莓派後執行：
+
+```bash
+git clone https://github.com/NTUT-Leo/discord-door-bot.git
+cd discord-door-bot
+```
+
+接著依需求選擇其中一條路線：
+
+| 安裝方式 | 適合對象 | 內容 |
 | --- | --- | --- |
-| 訊號線，通常為橘色或黃色 | Raspberry Pi GPIO 14，實體 Pin 8 | 3.3V PWM 控制訊號 |
-| 5V，通常為紅色 | 獨立 5V 電源正極 | 不要接到 GPIO 訊號腳 |
-| GND，通常為棕色或黑色 | 獨立電源負極，並接 Raspberry Pi GND | 外部電源與樹莓派必須共地 |
+| [方式一：互動式快速安裝](#方式一互動式快速安裝) | 想快速完成部署的使用者 | 由安裝器詢問必要資料並完成系統設定 |
+| [方式二：手動 DIY 安裝](#方式二手動-diy-安裝) | 想理解每個部署步驟的使用者 | 依教學自行建立目錄、環境與服務 |
 
-SG90 啟動或受阻時的瞬間電流可能讓樹莓派低電壓、降頻或重新啟動。長期部署建議讓 SG90 使用獨立 5V 電源，並與樹莓派共地。
+兩種方式會得到相同的程式目錄、設定檔與 systemd 服務，請選擇其中一種即可。
 
-### 展示機的三腳直插配置
+### 方式一：互動式快速安裝
 
-展示機為了縮短線材，使用同一列的實體 Pin 4、Pin 6、Pin 8：
-
-```text
-Pin 4  -> 5V
-Pin 6  -> GND
-Pin 8  -> GPIO 14 訊號
-```
-
-標準 SG90 三腳接頭通常是「訊號、5V、GND」，與樹莓派這三支排針的「5V、GND、訊號」順序不同。不可直接插入。若採用此配置，必須先斷電，將端子重新排列為 5V、GND、訊號，並使用 `pinout` 再次確認實體腳位。
-
-直接從樹莓派 5V Pin 為 SG90 供電只適合經量測確認的低負載原型。若出現低電壓、馬達異常、樹莓派降頻或重啟，請立刻改用獨立 5V 電源。
-
-## 安裝機械結構
-
-1. 在未接電的狀態下，用手確認電鎖內哪一支連桿會在按下開門鈕時移動。
-2. 將繩索固定在該連桿上，確認拉動方向與原本按鈕相同。
-3. 安裝 SG90，使繩索在待機角度略微放鬆，且不會卡住鎖舌或其他機構。
-4. 暫時不要鎖緊搖臂與繩索。先完成無負載測試與小角度測試，再逐步調整。
-5. 測試室內開門鈕、鑰匙及原讀卡機，確認 SG90 失去電源時仍可正常開門。
-
-不要讓伺服馬達在終點持續頂住機構。程式在每次動作後呼叫 `detach()`，避免持續輸出 PWM 造成發熱與異音。
-
-## 安裝 Raspberry Pi OS
-
-1. 安裝並開啟 [Raspberry Pi Imager](https://www.raspberrypi.com/software/)。
-2. 選擇 Raspberry Pi 3、Raspberry Pi OS Lite 64-bit 與目標 microSD 卡。
-3. 在 OS Customisation 中設定：
-   - 主機名稱，例如 `door-server`
-   - 管理者使用者名稱與強密碼
-   - Wi-Fi SSID、密碼及正確的國家或地區
-   - 時區與鍵盤配置
-   - 啟用 SSH；正式環境建議使用 SSH 公鑰驗證
-4. 寫入並驗證 microSD 卡，插入 Raspberry Pi 後開機。
-5. 從同一網路的電腦連線：
+在專案目錄內執行：
 
 ```bash
-ssh <PI_USER>@<PI_HOST>
+sudo bash install.sh
 ```
 
-若你自行更改 SSH 連接埠：
+安裝器會：
 
-```bash
-ssh -p <SSH_PORT> <PI_USER>@<PI_HOST>
-```
+1. 以隱藏輸入讀取 Discord Bot Token。
+2. 詢問 Discord Guild ID。
+3. 顯示目前設定或建議預設值：BCM GPIO14、角度範圍 `0–90°`、待機 `0°`、開鎖 `37°`、開鎖保持與復位等待各 `0.5` 秒。
+4. 詢問要直接採用設定，或進入進階模式逐項修改。
+5. 偵測 GPIO14 是否與 serial console 或 UART 衝突。
+6. 顯示不含 Token 的安裝摘要，確認後才開始變更系統。
+7. 安裝套件、建立設定檔與 systemd 服務。
 
-## 關閉 GPIO 14 的序列埠功能
+重新執行安裝器時，可以沿用既有 Token 與設定。安裝器不會執行完整系統升級、不修改 Wi-Fi 或 SSH，也不會自動重新開機。
 
-GPIO 14 同時是 UART TX 腳位。若序列主控台仍在開機時輸出資料，SG90 可能把資料波形誤判成控制訊號而亂轉。
-
-執行：
-
-```bash
-sudo raspi-config
-```
-
-進入 `Interface Options` 的 `Serial Port`，對下列兩個問題都選擇 `No`：
-
-1. 是否允許透過序列埠登入。
-2. 是否啟用序列埠硬體。
-
-完成後重新啟動：
+如果安裝結果提示需要重新開機：
 
 ```bash
 sudo reboot
 ```
 
-重新登入後檢查：
+重新連線後確認服務：
 
 ```bash
-grep -o 'console=serial[^ ]*' /boot/firmware/cmdline.txt
-grep '^enable_uart' /boot/firmware/config.txt
+sudo systemctl status doorbot.service --no-pager
 ```
 
-第一個指令不應輸出任何內容，第二個應顯示 `enable_uart=0`。若開機瞬間仍會輕微抖動，可在 GPIO 14 訊號與 GND 之間加裝 10 kΩ 下拉電阻。
+若不需要重新開機，安裝器會直接啟動服務。
 
-## 建立 Discord Bot
+### 方式二：手動 DIY 安裝
 
-1. 前往 [Discord Developer Portal](https://discord.com/developers/applications)，建立 New Application。
-2. 進入 Bot 頁面建立 Bot，產生 Token 並立即安全保存。
-3. 不要把 Token 貼到程式碼、README、截圖、對話紀錄或 Git commit。
-4. 本專案使用 Slash Command，不需要開啟 Message Content Intent、Presence Intent 或 Server Members Intent。
-5. 在 Installation 或 OAuth2 URL Generator 中加入 `bot` 與 `applications.commands` scope。
-6. 只授予必要的伺服器權限，例如 View Channels 與 Send Messages，然後把 Bot 安裝到指定的 Discord 伺服器。
+以下命令都在剛才下載的 `discord-door-bot` 專案目錄內執行。
 
-接著在 Discord 使用者設定的 Advanced 頁面開啟 Developer Mode，對目標伺服器按右鍵並複製 Server ID。這個 Guild ID 會讓程式只把 `/open` 註冊到指定伺服器，通常也能更快看到更新後的指令。
-
-Bot 安裝完成後，由伺服器管理員設定開門權限：
-
-1. 進入 `Server Settings` > `Integrations`。
-2. 找到這個 Bot，按下 `Manage`。
-3. 在整個應用程式或 `/open` 指令的權限中，設定允許使用的身分組與頻道。
-4. 若只允許特定身分組開門，可禁止 `@everyone`，再加入允許的實驗室身分組。
-5. 在使用頻道確認該身分組具有 `Use Application Commands` 權限。
-
-沒有權限的成員不會在指令選單中看到 `/open`。具有 Administrator 權限的成員不受一般指令限制，因此管理員身分組也應審慎分配。
-
-## 安裝系統套件與 Python 環境
-
-登入 Raspberry Pi 後執行：
+#### 1. 安裝系統套件
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pip python3-venv swig liblgpio-dev
-
-mkdir -p ~/discord-door-bot
-cd ~/discord-door-bot
-python3 -m venv .venv
-source .venv/bin/activate
-
-python -m pip install --upgrade pip
-python -m pip install discord.py gpiozero rpi-lgpio
+sudo apt install -y \
+  python3-pip python3-venv python3-dev \
+  build-essential swig liblgpio-dev
 ```
 
-`rpi-lgpio` 與 `RPi.GPIO` 會提供相同的 `RPi.GPIO` 模組名稱，不可安裝在同一個虛擬環境。若新建立的 `.venv` 中意外已有 `RPi.GPIO`，先移除再重裝：
+這裡只更新 apt 套件清單並安裝必要套件，不會執行完整系統升級。
+
+#### 2. 安裝程式與 Python 套件
 
 ```bash
-python -m pip uninstall RPi.GPIO
-python -m pip install --force-reinstall rpi-lgpio
+sudo install -d -o root -g root -m 0755 /opt/discord-door-bot
+sudo install -o root -g root -m 0644 \
+  door_bot.py requirements.txt /opt/discord-door-bot/
+
+sudo python3 -m venv /opt/discord-door-bot/.venv
+sudo /opt/discord-door-bot/.venv/bin/python -m pip install --upgrade pip
+sudo /opt/discord-door-bot/.venv/bin/python -m pip install --upgrade \
+  -r /opt/discord-door-bot/requirements.txt
 ```
 
-## 建立 Bot 程式
+`requirements.txt` 不指定套件版本，因此會安裝執行當時的最新版。如果未來上游推出不相容版本，請參考疑難排解或自行固定已知可用版本。
 
-在 `~/discord-door-bot/door_bot.py` 建立下列內容：
+#### 3. 建立設定檔
 
-```python
-import asyncio
-import os
-
-import discord
-from discord.ext import commands
-from gpiozero import AngularServo
-
-
-TOKEN = os.environ["DISCORD_BOT_TOKEN"]
-GUILD_ID = int(os.environ["DISCORD_GUILD_ID"])
-
-SERVO_PIN = 14
-REST_ANGLE = 0
-OPEN_ANGLE = 37
-OPEN_SECONDS = 0.5
-RETURN_SECONDS = 0.5
-
-GUILD = discord.Object(id=GUILD_ID)
-servo = AngularServo(
-    SERVO_PIN,
-    min_angle=0,
-    max_angle=90,
-    initial_angle=None,
-)
-servo_lock = asyncio.Lock()
-
-
-async def park_servo() -> None:
-    servo.angle = REST_ANGLE
-    await asyncio.sleep(RETURN_SECONDS)
-    servo.detach()
-
-
-class DoorBot(commands.Bot):
-    async def setup_hook(self) -> None:
-        await self.tree.sync(guild=GUILD)
-        await park_servo()
-
-
-intents = discord.Intents.default()
-bot = DoorBot(command_prefix=commands.when_mentioned, intents=intents)
-
-
-@bot.event
-async def on_ready() -> None:
-    print(f"已登入為 {bot.user}")
-
-
-@bot.tree.command(
-    name="open",
-    description="解鎖實驗室門禁",
-    guild=GUILD,
-)
-async def open_door(interaction: discord.Interaction) -> None:
-    if servo_lock.locked():
-        await interaction.response.send_message(
-            "門鎖正在執行上一個指令，請稍候再試。",
-            ephemeral=True,
-        )
-        return
-
-    await interaction.response.send_message(
-        "收到指令，正在解鎖。",
-        ephemeral=True,
-    )
-
-    async with servo_lock:
-        try:
-            servo.angle = OPEN_ANGLE
-            await asyncio.sleep(OPEN_SECONDS)
-            servo.angle = REST_ANGLE
-            await asyncio.sleep(RETURN_SECONDS)
-        except Exception:
-            await interaction.followup.send(
-                "伺服馬達控制失敗，請聯絡管理者。",
-                ephemeral=True,
-            )
-            raise
-        finally:
-            servo.detach()
-
-    await interaction.followup.send("已解鎖。", ephemeral=True)
-
-
-bot.run(TOKEN)
-```
-
-## 設定憑證
-
-用目前登入的 Raspberry Pi 使用者建立僅本人可讀的設定檔：
+第一次安裝時執行：
 
 ```bash
-mkdir -p ~/.config/discord-door-bot
-chmod 700 ~/.config/discord-door-bot
-nano ~/.config/discord-door-bot/env
+sudo install -o root -g root -m 0600 \
+  .env.example /etc/discord-door-bot.env
+sudoedit /etc/discord-door-bot.env
 ```
 
-在設定檔中輸入以下內容：
+將範例 Token、Guild ID 換成自己的資料，並依現場調整伺服馬達設定。不要把真實 Token 寫回專案內的 `.env.example`。
 
-```ini
-DISCORD_BOT_TOKEN=你的BotToken
-DISCORD_GUILD_ID=伺服器ID
-```
+如果 `/etc/discord-door-bot.env` 已存在，請直接執行 `sudoedit /etc/discord-door-bot.env`，避免以範例檔覆蓋既有 Token。
 
-儲存後限制檔案權限：
+#### 4. 建立 systemd 服務
 
 ```bash
-chmod 600 ~/.config/discord-door-bot/env
-```
+RUN_USER="$(id -un)"
+RUN_GROUP="$(id -gn)"
 
-> [!WARNING]
-> 任何曾經貼到對話、文件或 Git 的 Token 都應視為已外洩。請在 Discord Developer Portal 重置，不要繼續使用舊 Token。
+sed \
+  -e "s/@RUN_USER@/${RUN_USER}/g" \
+  -e "s/@RUN_GROUP@/${RUN_GROUP}/g" \
+  doorbot.service.template | \
+  sudo tee /etc/systemd/system/doorbot.service >/dev/null
 
-## 首次測試與角度校正
-
-先不要連接繩索，載入環境變數後手動執行：
-
-```bash
-cd ~/discord-door-bot
-set -a
-source ~/.config/discord-door-bot/env
-set +a
-.venv/bin/python door_bot.py
-```
-
-在指定的 Discord 伺服器輸入 `/open`。確認 Bot 私下回覆、SG90 由待機角度轉到開鎖角度，再回到待機角度。
-
-按 `Ctrl+C` 停止程式，逐步調整：
-
-```python
-REST_ANGLE = 0
-OPEN_ANGLE = 37
-OPEN_SECONDS = 0.5
-```
-
-建議每次只增加或減少 5° 至 10°。先測空載，再鬆鬆地接上繩索，最後才固定。若馬達發出持續異音、卡在終點、繩索過緊或樹莓派重新啟動，應立即斷電並調整機構或供電。
-
-## 建立 systemd 開機服務
-
-查詢目前使用者名稱：
-
-```bash
-whoami
-```
-
-建立服務檔：
-
-```bash
-sudo nano /etc/systemd/system/doorbot.service
-```
-
-貼上下列內容，將每一個 `<PI_USER>` 換成 `whoami` 顯示的使用者名稱：
-
-```ini
-[Unit]
-Description=Discord Door Bot Service
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=<PI_USER>
-Group=<PI_USER>
-SupplementaryGroups=gpio
-WorkingDirectory=/home/<PI_USER>/discord-door-bot
-EnvironmentFile=/home/<PI_USER>/.config/discord-door-bot/env
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/<PI_USER>/discord-door-bot/.venv/bin/python /home/<PI_USER>/discord-door-bot/door_bot.py
-Restart=always
-RestartSec=10
-UMask=0077
-
-[Install]
-WantedBy=multi-user.target
-```
-
-載入、啟用並啟動服務：
-
-```bash
+sudo chown root:root /etc/systemd/system/doorbot.service
+sudo chmod 0644 /etc/systemd/system/doorbot.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now doorbot.service
+sudo systemctl enable doorbot.service
 ```
 
-檢查服務：
+服務以目前登入帳號執行，並透過 `SupplementaryGroups=gpio` 取得 GPIO 權限。
+
+#### 5. 處理 GPIO14 與 UART 衝突
+
+GPIO14 同時是 UART TX。若保留 serial console 或 UART hardware，開機輸出可能被 SG90 誤認為控制訊號而產生抖動。
+
+使用 GPIO14 時執行：
 
 ```bash
-sudo systemctl status doorbot.service
+sudo raspi-config nonint do_serial_cons 1
+sudo raspi-config nonint do_serial_hw 1
+sudo reboot
 ```
 
-看到 `active (running)` 後，再到 Discord 測試 `/open`。重新啟動 Raspberry Pi，確認 Bot 會自行上線，而且 SG90 不會在開機過程亂轉。
+重新開機後，服務會自動啟動。這兩個設定分別停用 serial console 與 UART hardware；若 UART 必須保留，請把訊號線改接其他 GPIO，並同步修改 `SERVO_GPIO`。[Raspberry Pi serial 設定](https://www.raspberrypi.com/documentation/computers/configuration.html#enable-or-disable-serial-port)
 
-## 日常維護
+若使用其他 GPIO 且不需重新開機，直接啟動服務：
 
-修改程式後重新啟動：
+```bash
+sudo systemctl start doorbot.service
+```
+
+#### 6. 確認服務
+
+```bash
+sudo systemctl status doorbot.service --no-pager
+sudo journalctl -u doorbot.service -n 50 --no-pager
+```
+
+看到 Bot 成功登入並同步一個 Guild 指令後，就可以到 Discord 執行 `/open`。
+
+## 設定項目
+
+設定檔位於 `/etc/discord-door-bot.env`，擁有者與權限應為 `root:root 0600`。
+
+| 變數 | 必填 | 預設值 | 說明 |
+| --- | :---: | ---: | --- |
+| `DISCORD_BOT_TOKEN` | 是 | 無 | Discord Bot Token |
+| `DISCORD_GUILD_ID` | 是 | 無 | 唯一同步 `/open` 的 Discord 伺服器 ID |
+| `SERVO_GPIO` | 否 | `14` | BCM GPIO 編號，不是實體 Pin 編號 |
+| `SERVO_MIN_ANGLE` | 否 | `0` | 伺服馬達設定的最小角度 |
+| `SERVO_MAX_ANGLE` | 否 | `90` | 伺服馬達設定的最大角度 |
+| `SERVO_REST_ANGLE` | 否 | `0` | 待機與復位角度 |
+| `SERVO_OPEN_ANGLE` | 否 | `37` | 拉動開鎖機構的角度 |
+| `SERVO_HOLD_SECONDS` | 否 | `0.5` | 維持開鎖角度的秒數 |
+| `SERVO_RETURN_SECONDS` | 否 | `0.5` | 回到待機角度後、停止 PWM 前的等待秒數 |
+
+程式會先驗證 Guild ID、GPIO、角度與時間，確認設定合理後才載入 Discord 與 GPIO 套件；發生錯誤時不會輸出 Token。
+
+## 校正 SG90
+
+第一次部署後，微調角度或等待時間時不必重新執行安裝器。編輯既有設定檔：
+
+```bash
+sudoedit /etc/discord-door-bot.env
+```
+
+儲存後重新啟動服務：
 
 ```bash
 sudo systemctl restart doorbot.service
+```
+
+建議依下列順序校正：
+
+1. 先將繩索與鎖體分離，只觀察馬達空轉方向。
+2. 讓 `SERVO_OPEN_ANGLE` 從接近 `SERVO_REST_ANGLE` 的小幅度值開始。
+3. 儲存設定、重新啟動服務，再到 Discord 執行 `/open`。
+4. 重複「修改設定 → 重新啟動服務 → 執行 `/open`」，每次只增加少量角度。
+5. 接上繩索後繼續小幅調整，直到剛好能拉動開鎖機構。
+6. 保留機械餘裕，不要讓 SG90 頂住極限或持續堵轉。
+7. 確認回到 `SERVO_REST_ANGLE` 時繩索已放鬆，且不妨礙原有按鈕。
+
+> [!TIP]
+> 每次重新啟動服務時，SG90 都會先移動至設定的 `SERVO_REST_ANGLE` 待機角度一次。
+
+## Discord 權限管理
+
+`/open` 只會註冊到 `DISCORD_GUILD_ID` 指定的伺服器。程式第一次成功啟動時，也會移除相同 Application 過去註冊的全域指令，避免同時看到兩個 `/open`。
+
+到 Discord 的 **Server Settings > Integrations > 你的 Bot > Manage**：
+
+1. 拒絕不應操作門鎖的人員或角色。
+2. 只允許指定成員或實驗室角色使用 `/open`。
+3. 視需要限制只能在特定門禁頻道執行。
+4. 使用一般成員帳號確認最終權限符合預期。
+
+Discord 伺服器管理員仍能修改 Integrations 權限，因此應限制管理員角色並定期檢查成員。
+
+## 服務管理
+
+```bash
+# 查看狀態
 sudo systemctl status doorbot.service
-```
 
-持續查看日誌：
-
-```bash
+# 追蹤即時日誌
 sudo journalctl -u doorbot.service -f
-```
 
-停止或再次啟動：
+# 查看最近 100 行
+sudo journalctl -u doorbot.service -n 100 --no-pager
 
-```bash
+# 重新啟動
+sudo systemctl restart doorbot.service
+
+# 停止與啟動
 sudo systemctl stop doorbot.service
 sudo systemctl start doorbot.service
 ```
 
-## 故障排除
+日誌不會主動輸出 Token；分享日誌前仍應人工確認沒有自行加入的敏感資訊。
+
+### 更新程式
+
+使用快速安裝方式的使用者可執行：
+
+```bash
+cd discord-door-bot
+git pull
+sudo bash install.sh
+```
+
+安裝器會詢問是否沿用現有 Token 與設定。只修改角度或等待時間時不需要執行這個流程，直接編輯設定檔即可。
+
+## 疑難排解
 
 ### Discord 看不到 `/open`
 
-- 確認 Bot 已安裝到 `DISCORD_GUILD_ID` 指定的伺服器。
-- 確認安裝時包含 `applications.commands` scope。
-- 重新啟動 `doorbot.service`，查看日誌是否顯示登入或同步錯誤。
-- 完全關閉並重新開啟 Discord App，以重新載入指令清單。
+- 確認 `DISCORD_GUILD_ID` 是 Server ID，不是頻道或使用者 ID。
+- 確認 Application 使用 Guild Install，且安裝設定包含 `applications.commands` 與 `bot` scopes。
+- 使用 `journalctl` 查看指令同步或權限錯誤。
+- 重新啟動 Discord 用戶端以更新指令選單。
 
-### Discord 顯示沒有權限
+Guild 指令通常會立即更新，不需要等待全域指令的傳播時間。[discord.py CommandTree 文件](https://discordpy.readthedocs.io/en/stable/interactions/api.html#discord.app_commands.CommandTree.sync)
 
-- 請伺服器管理員開啟 `Server Settings` > `Integrations`，檢查 Bot 或 `/open` 的身分組與頻道權限。
-- 確認使用者在目前頻道具有 `Use Application Commands` 權限。
-- 若剛修改權限，完全關閉並重新開啟 Discord App，再查看指令選單。
-
-### 無法存取 GPIO
-
-檢查目前使用者群組：
+### GPIO permission denied
 
 ```bash
-groups
+getent group gpio
+systemctl cat doorbot.service
 ls -l /dev/gpiochip*
 ```
 
-使用者應屬於 `gpio` 群組。若不是：
+確認系統存在 `gpio` 群組，且 service 內包含 `SupplementaryGroups=gpio`。
+
+### 安裝 rpi-lgpio 失敗
+
+若看到 `swig: not found` 或 `cannot find -llgpio`，重新確認：
 
 ```bash
-sudo usermod -aG gpio <PI_USER>
-sudo reboot
+sudo apt install -y python3-dev build-essential swig liblgpio-dev
+sudo /opt/discord-door-bot/.venv/bin/python -m pip install --upgrade rpi-lgpio
 ```
 
-### 安裝 `rpi-lgpio` 時找不到 `swig`
+### 開機時 SG90 抖動或亂轉
 
-```bash
-sudo apt install -y swig
-source ~/discord-door-bot/.venv/bin/activate
-python -m pip install --force-reinstall rpi-lgpio
+- GPIO14 必須停用 serial console 與 UART hardware，或改用其他 GPIO。
+- 確認接頭沒有把 5V、GND 與訊號接反。
+- 檢查 Raspberry Pi 與 SG90 的供電是否穩定。
+- 若作業系統接管 GPIO 前仍會短暫抖動，可改用其他 GPIO，或在訊號線加入適當的硬體下拉設計。
+
+### Bot 顯示完成但門沒有開
+
+「解鎖動作已完成」只代表程式已送出開鎖角度、等待、復位與停止 PWM，不代表門鎖已實際開啟。請檢查繩索、固定座、角度與供電。
+
+## 專案結構
+
+```text
+.
+├── door_bot.py                 # 單一 Bot 程式：設定、Discord 與伺服控制
+├── install.sh                  # 互動式快速安裝器
+├── requirements.txt            # 不鎖定版本的 Python 執行依賴
+├── .env.example                # 不含真實憑證的設定範例
+├── doorbot.service.template       # systemd 服務範本
+├── Result_Images/              # 原始成果照片
+├── .gitignore
+└── LICENSE                     # MIT License
 ```
 
-### 安裝時出現 `cannot find -llgpio`
+## License
 
-```bash
-sudo apt install -y liblgpio-dev
-source ~/discord-door-bot/.venv/bin/activate
-python -m pip install --force-reinstall rpi-lgpio
-```
-
-### SG90 在開機時亂轉
-
-- 確認 GPIO 14 的序列登入與 UART 硬體都已關閉。
-- 在 GPIO 14 與 GND 之間加裝 10 kΩ 下拉電阻。
-- 確認訊號、5V、GND 沒有插錯或接觸不良。
-- 改用獨立 5V 電源，並與樹莓派共地。
-
-### 執行 `/open` 時樹莓派重啟
-
-這通常是 SG90 啟動造成瞬間壓降。不要繼續反覆測試；先將 SG90 改接獨立 5V 電源，確認共地，再檢查 `vcgencmd get_throttled`。
-
-### 服務執行的不是最新程式
-
-確認 systemd 使用的檔案路徑：
-
-```bash
-systemctl cat doorbot.service
-sudo systemctl restart doorbot.service
-sudo journalctl -u doorbot.service -n 50 --no-pager
-```
-
-## 參考文件
-
-- [Raspberry Pi 官方安裝與設定說明](https://www.raspberrypi.com/documentation/computers/getting-started.html)
-- [Raspberry Pi 官方 UART 與 GPIO 設定](https://www.raspberrypi.com/documentation/computers/configuration.html)
-- [Raspberry Pi 官方 GPIO 規格](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html)
-- [Discord Application Commands 官方文件](https://docs.discord.com/developers/interactions/application-commands)
-- [discord.py Interactions API](https://discordpy.readthedocs.io/en/stable/interactions/api.html)
-- [GPIO Zero AngularServo 文件](https://gpiozero.readthedocs.io/en/latest/api_output.html#angularservo)
-- [rpi-lgpio 安裝文件](https://rpi-lgpio.readthedocs.io/en/latest/install.html)
+[MIT License](LICENSE), Copyright © 2026 KANG.
