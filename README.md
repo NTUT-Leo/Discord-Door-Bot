@@ -108,7 +108,7 @@ vcgencmd get_throttled
 ## 準備 Discord Bot
 
 1. 開啟 [Discord Developer Portal](https://discord.com/developers/applications)，建立一個 Application。
-2. 在 **Bot** 頁面建立 Bot 並產生 Token。Token 只輸入樹莓派，不要放入程式碼、README、截圖或 Git commit。
+2. 在 **Bot** 頁面建立 Bot 並產生 Token。Token 只輸入樹莓派，不要放入程式碼、README、截圖或 Git commit。若 Token 不慎洩漏，務必立即 **Reset Token**
 3. 本專案不需要開啟 `Message Content Intent`、`Presence Intent` 或 `Server Members Intent`。
 4. 在 **Installation** 頁面啟用 **Guild Install**，並在 Default Install Settings 加入 `applications.commands` 與 `bot` scopes。Bot 權限只選擇實際需要的項目。[Discord 安裝設定](https://docs.discord.com/developers/tutorials/developing-a-user-installable-app#configuring-default-install-settings)
 5. 使用 Installation 頁面的安裝連結將 Bot 加入目標伺服器。
